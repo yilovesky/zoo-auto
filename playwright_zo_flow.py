@@ -127,8 +127,13 @@ def build_github_secret_update_payload(secret_value: str) -> dict:
 async def wait_for_workspace(page):
     urls = ["https://app.zo.computer/", "https://baico.zo.computer/", "https://www.zo.computer/app", "https://www.zo.computer/"]
     input_selector = "div[contenteditable='true']"
-    workspace_markers = ["新聊天", "首页", "文件", "聊天", "空间", "回复...", "有什么我能帮你的？", "New chat", "Recent chats"]
+    workspace_markers = [
+        "新聊天", "首页", "文件", "聊天", "空间", "回复...", "有什么我能帮你的？", "New chat", "Recent chats",
+        "Home", "Files", "Chats", "Automations", "Skills", "Settings", "TODAY", "YESTERDAY", "Channels", "Integrations",
+    ]
     marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO", "Customer Testimonials"]
+    marketing_only_markers = ["Pricing", "Blog", "Your home on the Internet", "Always-on AI that remembers you"]
+    strong_workspace_markers = ["Home", "Files", "Chats", "Automations", "Skills", "Settings", "TODAY", "YESTERDAY", "Channels", "Integrations"]
     for url in urls:
         print(f"正在尝试访问并校验状态: {url}")
         try:
@@ -137,29 +142,36 @@ async def wait_for_workspace(page):
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except:
                 pass
-            
+
             body_text = await page.locator("body").inner_text()
-            
-            if any(m in body_text for m in marketing_markers):
-                continue
 
             editor_found = False
             if hasattr(page, 'query_selector'):
                 editor_element = await page.query_selector(input_selector)
                 editor_found = (editor_element is not None)
             else:
-                editor_found = any(x in body_text for x in ["回复...", "有什么我能帮你的？", "Ask Zo"])
+                editor_found = any(x in body_text for x in ["回复...", "有什么我能帮你的？"])
                 if not editor_found:
                     editor_found = any(x in body_text for x in ["新聊天", "New chat"])
 
             has_markers = any(x in body_text for x in workspace_markers)
+            strong_workspace_count = sum(1 for x in strong_workspace_markers if x in body_text)
+            has_recent_or_integrations = any(x in body_text for x in ["Recent chats", "TODAY", "YESTERDAY", "Channels", "Integrations"])
+            looks_like_marketing_only = (
+                any(m in body_text for m in marketing_markers)
+                and not editor_found
+                and not has_recent_or_integrations
+                and any(m in body_text for m in marketing_only_markers)
+            )
+            if looks_like_marketing_only:
+                continue
 
-            if has_markers and editor_found:
+            if has_markers and (editor_found or has_recent_or_integrations):
                 print(f"✅ 状态校验通过")
                 return True
             else:
                 print(f"⚠️ 未发现完整工作区特征")
-                
+
         except Exception as e:
             print(f"访问 {url} 遇到预期外的错误: {str(e)}")
             continue
