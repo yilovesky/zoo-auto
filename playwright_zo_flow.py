@@ -102,7 +102,6 @@ def build_github_secret_update_payload(secret_value: str) -> dict:
 async def wait_for_workspace(page):
     urls = ["https://app.zo.computer/", "https://baico.zo.computer/", "https://www.zo.computer/app"]
     input_selector = "div[contenteditable='true']"
-    
     workspace_markers = ["新聊天", "首页", "文件", "聊天", "空间", "回复...", "New chat", "Recent chats"]
     marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO"]
 
@@ -114,18 +113,22 @@ async def wait_for_workspace(page):
                 await page.wait_for_load_state("networkidle", timeout=10000)
             except:
                 pass
+            
             body_text = await page.locator("body").inner_text()
+            
             if any(m in body_text for m in marketing_markers):
                 print(f"检测到营销页面内容，判定为未登录。")
                 continue
-            editor_found = await page.locator(input_selector).count()
+            editors = await page.locator(input_selector).is_visible() if hasattr(page.locator(input_selector), 'is_visible') else True
+            editor_element = await page.query_selector(input_selector)
+            
             has_markers = any(x in body_text for x in workspace_markers)
             
-            if has_markers and editor_found > 0:
+            if has_markers and editor_element is not None:
                 print(f"✅ 状态校验通过：已发现侧边栏和输入框。")
                 return True
             else:
-                print(f"⚠️ 页面虽有部分特征但未发现输入框 (Editor count: {editor_found})，视为未登录。")
+                print(f"⚠️ 页面虽有部分特征但未发现输入框，视为未登录。")
                 
         except Exception as e:
             print(f"访问 {url} 出错: {str(e)}")
