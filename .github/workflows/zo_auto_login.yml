@@ -1,6 +1,6 @@
 name: Zo Auto Login Bot
 
-"on":
+on:
   schedule:
     - cron: '0 1 * * *'
   workflow_dispatch: {}
