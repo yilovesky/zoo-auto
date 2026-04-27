@@ -100,20 +100,37 @@ def build_github_secret_update_payload(secret_value: str) -> dict:
 
 
 async def wait_for_workspace(page):
-    urls = ["https://baico.zo.computer/", "https://app.zo.computer/", "https://www.zo.computer/app", "https://www.zo.computer/"]
+    urls = ["https://app.zo.computer/", "https://baico.zo.computer/", "https://www.zo.computer/app"]
+    input_selector = "div[contenteditable='true']"
+    
     workspace_markers = ["新聊天", "首页", "文件", "聊天", "空间", "回复...", "New chat", "Recent chats"]
-    marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO", "Customer Testimonials"]
+    marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO"]
+
     for url in urls:
-        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        print(f"正在尝试访问并校验状态: {url}")
         try:
-            await page.wait_for_load_state("networkidle", timeout=15000)
-        except PlaywrightTimeoutError:
-            pass
-        current_url = page.url
-        body = await page.locator("body").inner_text()
-        is_workspace_host = current_url.startswith("https://app.zo.computer") or current_url.startswith("https://baico.zo.computer")
-        if is_workspace_host and any(x in body for x in workspace_markers) and not any(x in body for x in marketing_markers):
-            return True
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=10000)
+            except:
+                pass
+            body_text = await page.locator("body").inner_text()
+            if any(m in body_text for m in marketing_markers):
+                print(f"检测到营销页面内容，判定为未登录。")
+                continue
+            editor_found = await page.locator(input_selector).count()
+            has_markers = any(x in body_text for x in workspace_markers)
+            
+            if has_markers and editor_found > 0:
+                print(f"✅ 状态校验通过：已发现侧边栏和输入框。")
+                return True
+            else:
+                print(f"⚠️ 页面虽有部分特征但未发现输入框 (Editor count: {editor_found})，视为未登录。")
+                
+        except Exception as e:
+            print(f"访问 {url} 出错: {str(e)}")
+            continue
+
     return False
 
 
