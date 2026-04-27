@@ -1,0 +1,65 @@
+name: Zo-2 Auto Login Bot
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch: {}
+
+jobs:
+  login-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      GMAIL_USER: ${{ secrets.GMAIL_USER_2 }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD_2 }}
+      ZO_EMAIL: ${{ secrets.ZO_EMAIL }}
+      TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+      TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+      ZO_STORAGE_STATE_B64: ${{ secrets.ZO_STORAGE_STATE_B64_2 }}
+      GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      ZO_PROMPT: ${{ vars.ZO_PROMPT }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Restore storage state from secret
+        run: |
+          python3 - <<'EOF'
+          import base64, os, pathlib
+          raw = os.environ.get('ZO_STORAGE_STATE_B64', '').strip()
+          if raw and raw != 'e30=': # e30= 是 {} 的 base64
+              try:
+                  pathlib.Path('zo_storage_state.json').write_bytes(base64.b64decode(raw))
+                  print("Cookie restored successfully.")
+              except Exception as e:
+                  print(f"Failed to decode cookie: {e}")
+          EOF
+
+      - name: Run Zo flow
+        run: python playwright_zo_flow.py
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zo-debug-artifacts
+          path: |
+            zo_failure_state.png
+            zo_workspace_reply.png
+            zo_storage_state.json
+          if-no-files-found: ignore
+          retention-days: 7
