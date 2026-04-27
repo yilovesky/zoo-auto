@@ -1,85 +1,50 @@
 # zoo-auto
 
-Automates Zo email-link login using Gmail IMAP and a Gmail app password.
+最小版仓库：Zo 自动登录与已登录态复用。
 
-## What it does
+## 保留文件
 
-1. Triggers a Zo login email for your address
-2. Connects to Gmail over IMAP using your Gmail app password
-3. Finds the newest Zo login email
-4. Extracts the real `https://www.zo.computer/api/email-login/verify?...` link
-5. Opens that link in your default browser, or prints it
+- `login_zo.py` — 触发 Zo 邮件登录链接
+- `playwright_zo_flow.py` — 优先使用 GitHub Secret 中的 Cookie，失效时再触发登录，并在成功后自动回写最新 Cookie 到 GitHub Secret
+- `github_secrets.py` — GitHub Secret 读写辅助
+- `requirements.txt` — 运行依赖
+- `requirements-dev.txt` — 测试依赖
+- `tests/` — 最小测试集
+- `.github/workflows/ci.yml` — 测试工作流
+- `.github/workflows/zo_auto_login.yml` — 实际自动运行工作流
 
-## Files
+## 环境变量 / GitHub Secrets
 
-- `login_zo.py` — triggers Zo email login and extracts the newest magic link from Gmail
-- `playwright_zo_flow.py` — logs into Zo, sends the prompt, waits for the full reply, and screenshots the result to Telegram
-- `tests/test_login_zo.py` — magic-link parser tests
-- `tests/test_wait_for_workspace.py` — workspace detection tests
-- `tests/test_wait_for_reply_complete.py` — composer selection / Enter-send / reply-complete waiting tests
-- `tests/test_auth_state_reuse.py` — auth-state reuse tests
-- `.env.example` — environment variable template
-- `requirements.txt` — runtime dependency
-- `requirements-dev.txt` — test dependency bundle
+以下内容全部按 GitHub Secrets / Variables 使用：
 
-## Requirements
+### Secrets
+- `GMAIL_USER` — Gmail/Zo 登录邮箱
+- `GMAIL_APP_PASSWORD` — Gmail app password
+- `ZO_EMAIL` — 可选，若不填则回退到 `GMAIL_USER`
+- `TG_BOT_TOKEN` — Telegram bot token
+- `TG_CHAT_ID` — Telegram chat id
+- `ZO_STORAGE_STATE_B64` — Base64 编码后的 Playwright storage state / Cookie
+- `GH_PAT` — 用于自动更新 `ZO_STORAGE_STATE_B64` 的 GitHub PAT，必须包含 `repo` 和 `workflow`
 
-- Python 3.10+
-- A Gmail account with IMAP enabled
-- A Gmail app password
+### Variables
+- `ZO_PROMPT` — 运行时发送的提示词，可选
 
-## Configure
+## 工作方式
 
-Copy `.env.example` into your shell environment or a local `.env` file you do **not** commit.
+1. 工作流启动时，把 `ZO_STORAGE_STATE_B64` 解码为本地 `zo_storage_state.json`
+2. 如果 Cookie 可用，直接复用
+3. 如果 Cookie 不可用，则触发 Zo 邮件登录
+4. 流程结束后，把最新 storage state 重新编码
+5. 若仓库里已有 `GH_PAT`，脚本会自动把新的 `ZO_STORAGE_STATE_B64` 回写到当前仓库 Secret
 
-Example:
-
-```bash
-export GMAIL_USER='yilovesky520@gmail.com'
-export GMAIL_APP_PASSWORD='your_gmail_app_password_here'
-```
-
-## Usage
-
-Print the Zo magic link without opening a browser:
+## 本地测试
 
 ```bash
-python3 login_zo.py --no-browser
+python3 -m pip install -r requirements-dev.txt
+pytest -q
 ```
 
-Trigger the email, fetch the newest Zo magic link, and open it in the default browser:
+## 注意
 
-```bash
-python3 login_zo.py
-```
-
-Use a custom timeout while waiting for the email:
-
-```bash
-python3 login_zo.py --timeout 180
-```
-
-Use explicit credentials instead of environment variables:
-
-```bash
-python3 login_zo.py --email 'yilovesky520@gmail.com' --app-password 'YOUR_APP_PASSWORD'
-```
-
-## Test
-
-```bash
-python3 -m pip install --user -r requirements-dev.txt
-python3 -m playwright install chromium
-python3 -m pytest -q
-```
-
-## GitHub Actions
-
-A CI workflow is included at `.github/workflows/ci.yml`.
-It runs on pushes to `main`, pull requests, and manual dispatch, then installs Python 3.11 dependencies and runs `pytest -q`.
-
-## Notes
-
-- The script reads only the mailbox needed to find the Zo login email.
-- Zo login links expire quickly, so the script fetches the newest matching message.
-- If Zo changes its email format, update the regexes in `login_zo.py` and re-run tests.
+- 不提交 `.env`、`.venv`、截图、调试 json/html、缓存文件
+- GitHub Actions 里不会依赖本地文件保存账号密码或 Cookie

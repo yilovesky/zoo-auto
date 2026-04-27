@@ -2,6 +2,7 @@
 import argparse
 import email
 import imaplib
+import json
 import os
 import quopri
 import re
@@ -13,6 +14,7 @@ from email.utils import parsedate_to_datetime
 from html import unescape
 from typing import Iterable, Optional
 from urllib.parse import unquote
+import urllib.request
 
 ZO_VERIFY_RE = re.compile(r'https://www\.zo\.computer/api/email-login/verify\?[^\s<>"\']+', re.IGNORECASE)
 GENERIC_URL_RE = re.compile(r'https?://[^\s<>"\']+')
@@ -59,9 +61,6 @@ def find_latest_zo_magic_link(messages: Iterable[Message]) -> Optional[str]:
 
 
 def trigger_login_email(address: str) -> None:
-    import json
-    import urllib.request
-
     payload = json.dumps({"email": address, "redirect": "/signup"}).encode("utf-8")
     req = urllib.request.Request(
         "https://www.zo.computer/api/email-login/request",
@@ -78,10 +77,7 @@ def trigger_login_email(address: str) -> None:
         body = resp.read()
         if resp.status != 200:
             raise RuntimeError(f"Zo login trigger failed with HTTP {resp.status}")
-        try:
-            parsed = json.loads(body.decode("utf-8", errors="replace")) if body else {}
-        except Exception as exc:
-            raise RuntimeError(f"Zo login trigger returned non-JSON body: {body[:200]!r}") from exc
+        parsed = json.loads(body.decode("utf-8", errors="replace")) if body else {}
         if parsed.get("ok") is not True:
             raise RuntimeError(f"Zo login trigger did not confirm success: {parsed!r}")
 
@@ -96,7 +92,7 @@ def fetch_magic_link_from_gmail(email_address: str, app_password: str, timeout_s
             ids = [i for i in data[0].split() if i]
             if not ids:
                 _, data = mail.search(None, '(TEXT "zo.computer")')
-            ids = [i for i in data[0].split() if i]
+                ids = [i for i in data[0].split() if i]
             if ids:
                 messages = []
                 for msg_id in ids[-10:]:

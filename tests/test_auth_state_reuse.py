@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import playwright_zo_flow as flow
 
@@ -24,6 +23,7 @@ def test_choose_auth_strategy_prefers_saved_state_when_usable(tmp_path, monkeypa
 def test_choose_auth_strategy_falls_back_to_magic_link_when_state_missing(tmp_path, monkeypatch):
     state = tmp_path / 'missing.json'
     monkeypatch.setattr(flow, 'STATE_PATH', state)
+    monkeypatch.delenv('ZO_STORAGE_STATE_B64', raising=False)
     assert flow.choose_auth_strategy() == 'magic_link'
 
 
@@ -47,8 +47,8 @@ def test_create_context_uses_storage_state_when_available(tmp_path, monkeypatch)
 
 def test_create_context_omits_storage_state_when_unusable(tmp_path, monkeypatch):
     state = tmp_path / 'zo_state.json'
-    state.write_text(json.dumps({'cookies': [], 'origins': []}))
     monkeypatch.setattr(flow, 'STATE_PATH', state)
+    monkeypatch.delenv('ZO_STORAGE_STATE_B64', raising=False)
 
     seen = {}
 
