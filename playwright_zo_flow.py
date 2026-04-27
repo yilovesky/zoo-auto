@@ -118,13 +118,13 @@ async def wait_for_workspace(page):
 
 
 async def fill_prosemirror(editor, page, text):
-    # 1. 确保聚焦到编辑器
     await editor.click(force=True)
-    # 2. 清空现有内容（全选 + 退格）
-    await page.keyboard.press("Control+A") # Mac 用户可能需要 Meta+A，但 Actions 环境用 Control
+    await page.wait_for_timeout(500)
+    await page.keyboard.press("Control+A")
+    await page.wait_for_timeout(200)
     await page.keyboard.press("Backspace")
-    # 3. 模拟打字
-    await page.keyboard.type(text, delay=50) # 加上一小点延迟，更像真人
+    await page.wait_for_timeout(500)
+    await page.keyboard.type(text, delay=100) 
     await page.wait_for_timeout(1000)
 
 
