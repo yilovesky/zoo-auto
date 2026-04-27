@@ -58,3 +58,27 @@ def test_wait_for_workspace_accepts_custom_workspace_host():
         }
     )
     assert flow.asyncio.run(flow.wait_for_workspace(page)) is True
+
+
+def test_wait_for_workspace_accepts_ask_placeholder_state():
+    page = DummyPage(
+        {
+            "https://baico.zo.computer/": "首页\n文件\n聊天\n新聊天\n有什么我能帮你的？",
+            "https://app.zo.computer/": "unused",
+            "https://www.zo.computer/app": "unused",
+            "https://www.zo.computer/": "unused",
+        }
+    )
+    assert flow.asyncio.run(flow.wait_for_workspace(page)) is True
+
+
+def test_wait_for_workspace_accepts_workspace_without_editor_probe_when_markers_exist():
+    page = DummyPage(
+        {
+            "https://baico.zo.computer/": "首页\n文件\n聊天\n新聊天",
+            "https://app.zo.computer/": "unused",
+            "https://www.zo.computer/app": "unused",
+            "https://www.zo.computer/": "unused",
+        }
+    )
+    assert flow.asyncio.run(flow.wait_for_workspace(page)) is True

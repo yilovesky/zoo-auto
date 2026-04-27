@@ -10,12 +10,37 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 from playwright.async_api import async_playwright
 
 from github_secrets import update_github_storage_secret_if_possible, write_storage_state_if_present
-from login_zo import trigger_login_email
+from login_zo import fetch_magic_link_from_gmail, trigger_login_email
 
 SUCCESS_SCREENSHOT_PATH = Path("zo_workspace_reply.png")
 FAIL_SCREENSHOT_PATH = Path("zo_failure_state.png")
 STATE_PATH = Path("zo_storage_state.json")
-PROMPT = os.getenv("ZO_PROMPT", "现在北京时间是几点")
+PROMPT = os.getenv(
+    "ZO_PROMPT",
+    """你先帮我重启我的哪吒探针agent.sh，确保哪吒探针agent.sh在运行后再帮我依次运行下面的代码，并发给我日志中显示的最新的域名
+
+nohup /usr/local/bin/cloudflared tunnel --url http://127.0.0.1:8000 >> /opt/openai-cpa/cf.log 2>&1 &
+
+cd /opt/openai-cpa && source venv/bin/activate
+
+nohup python wfxl_openai_regst.py >> /opt/openai-cpa/run.log 2>&1 &
+
+grep -o 'https://.*\.trycloudflare\.com' /opt/openai-cpa/cf.log""",
+)
+
+
+def extract_latest_trycloudflare_domain(text: str):
+    import re
+
+    matches = re.findall(r"https://[^\s'\"]+\.trycloudflare\.com", text)
+    return matches[-1] if matches else None
+
+
+def build_success_caption(body: str) -> str:
+    domain = extract_latest_trycloudflare_domain(body)
+    if domain:
+        return f"最新域名: {domain}"
+    return "Zo 自动流程成功截图"
 
 
 def tg_send_photo(photo_path: Path, caption: str) -> None:
@@ -100,12 +125,10 @@ def build_github_secret_update_payload(secret_value: str) -> dict:
 
 
 async def wait_for_workspace(page):
-    urls = ["https://app.zo.computer/", "https://baico.zo.computer/", "https://www.zo.computer/app"]
-    
+    urls = ["https://app.zo.computer/", "https://baico.zo.computer/", "https://www.zo.computer/app", "https://www.zo.computer/"]
     input_selector = "div[contenteditable='true']"
-    workspace_markers = ["新聊天", "首页", "文件", "聊天", "空间", "回复...", "New chat", "Recent chats"]
-    marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO"]
-
+    workspace_markers = ["新聊天", "首页", "文件", "聊天", "空间", "回复...", "有什么我能帮你的？", "New chat", "Recent chats"]
+    marketing_markers = ["Sign up", "YOUR COMPUTER IN THE CLOUD", "PEOPLE LOVE ZO", "Customer Testimonials"]
     for url in urls:
         print(f"正在尝试访问并校验状态: {url}")
         try:
@@ -126,9 +149,11 @@ async def wait_for_workspace(page):
                 editor_found = (editor_element is not None)
             else:
                 editor_found = any(x in body_text for x in ["回复...", "有什么我能帮你的？", "Ask Zo"])
+                if not editor_found:
+                    editor_found = any(x in body_text for x in ["新聊天", "New chat"])
 
             has_markers = any(x in body_text for x in workspace_markers)
-            
+
             if has_markers and editor_found:
                 print(f"✅ 状态校验通过")
                 return True
@@ -144,24 +169,72 @@ async def wait_for_workspace(page):
 
 async def fill_prosemirror(editor, page, text):
     await editor.click(force=True)
-    await page.wait_for_timeout(500)
-    await page.keyboard.press("Control+A")
-    await page.wait_for_timeout(200)
-    await page.keyboard.press("Backspace")
-    await page.wait_for_timeout(500)
-    await page.keyboard.type(text, delay=100) 
+    try:
+        await editor.fill(text)
+    except Exception:
+        pass
+    current_text = (await editor.inner_text()).strip()
+    if current_text != text:
+        try:
+            await page.keyboard.press("Control+A")
+        except Exception:
+            pass
+        try:
+            await page.keyboard.press("Meta+A")
+        except Exception:
+            pass
+        await page.keyboard.type(text)
     await page.wait_for_timeout(1000)
+
+
+async def click_send_button_if_present(page) -> bool:
+    selectors = [
+        "button[type='submit']",
+        "button[aria-label='Send message']",
+        "button[aria-label='发送']",
+        "button[data-testid='send-button']",
+        "button:has(svg)",
+    ]
+    for selector in selectors:
+        try:
+            button = page.locator(selector).last
+            await button.wait_for(timeout=3000)
+            await button.click(force=True)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def body_shows_submitted_state(body_before: str, body_after: str) -> bool:
+    if PROMPT in body_after and "Zo is thinking" not in body_after and "Press Esc to stop" not in body_after and len(body_after) > len(body_before):
+        return True
+
+    if extract_latest_trycloudflare_domain(body_after):
+        return True
+
+    transition_markers = ["回复...", "加载中...", "Thinking...", "Zo is thinking", "Press Esc to stop"]
+    stable_markers = ["最终回复内容", "最新域名"]
+    if any(marker in body_after for marker in transition_markers):
+        before_has_reply_markers = any(marker in body_before for marker in transition_markers)
+        after_has_reply_state = any(marker in body_after for marker in stable_markers)
+        if after_has_reply_state and not before_has_reply_markers:
+            return True
+
+    return False
 
 
 async def try_send_prompt(page):
     body_before = await page.locator("body").inner_text()
-    selectors = [
+    selector_candidates = [
         "div[contenteditable='true'][data-placeholder='有什么我能帮你的？']",
         "div[contenteditable='true'][data-placeholder='回复...']",
+        "div.tiptap.ProseMirror",
+        "div[contenteditable='true']",
     ]
     editor = None
     selector = None
-    for candidate in selectors:
+    for candidate in selector_candidates:
         loc = page.locator(candidate).last
         try:
             await loc.wait_for(timeout=15000)
@@ -174,14 +247,21 @@ async def try_send_prompt(page):
         return False, await page.locator("body").inner_text()
     await fill_prosemirror(editor, page, PROMPT)
     await page.press(selector, "Enter")
+    body_after_enter = await page.locator("body").inner_text()
+    if PROMPT not in body_after_enter:
+        clicked = await click_send_button_if_present(page)
+        if clicked:
+            await page.wait_for_timeout(1000)
     await page.wait_for_timeout(3000)
-    deadline = time.time() + 180
     last_body = await page.locator("body").inner_text()
+    if body_shows_submitted_state(body_before, last_body):
+        return True, last_body
+    deadline = time.time() + 180
     while time.time() < deadline:
-        if PROMPT in last_body and "Zo is thinking" not in last_body and "Press Esc to stop" not in last_body and len(last_body) > len(body_before):
-            return True, last_body
         await page.wait_for_timeout(3000)
         last_body = await page.locator("body").inner_text()
+        if body_shows_submitted_state(body_before, last_body):
+            return True, last_body
     return False, last_body
 
 
@@ -192,7 +272,23 @@ async def fill_prompt_and_wait(page):
 async def ensure_logged_in(page, email_addr: str) -> bool:
     if await wait_for_workspace(page):
         return True
+    if choose_auth_strategy() == "saved_state":
+        try:
+            await page.context.clear_cookies()
+        except Exception:
+            pass
     trigger_login_email(email_addr)
+    app_password = os.getenv("GMAIL_APP_PASSWORD", "").strip()
+    if app_password:
+        try:
+            link = fetch_magic_link_from_gmail(email_addr, app_password, timeout_seconds=120)
+            await page.goto(link, wait_until="domcontentloaded", timeout=60000)
+            try:
+                await page.wait_for_load_state("networkidle", timeout=15000)
+            except PlaywrightTimeoutError:
+                pass
+        except Exception:
+            pass
     return await wait_for_workspace(page)
 
 
@@ -225,7 +321,7 @@ async def run_flow():
 
         if sent:
             await page.screenshot(path=str(SUCCESS_SCREENSHOT_PATH), full_page=True)
-            tg_send_photo(SUCCESS_SCREENSHOT_PATH, "Zo 自动流程成功截图")
+            tg_send_photo(SUCCESS_SCREENSHOT_PATH, build_success_caption(body))
             print(f"Screenshot saved to {SUCCESS_SCREENSHOT_PATH.resolve()}")
         else:
             await page.screenshot(path=str(FAIL_SCREENSHOT_PATH), full_page=True)
