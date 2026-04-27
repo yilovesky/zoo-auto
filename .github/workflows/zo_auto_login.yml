@@ -38,14 +38,16 @@ jobs:
 
       - name: Restore storage state from secret
         run: |
-          if [ -n "$ZO_STORAGE_STATE_B64" ]; then
-            python - <<'PY'
-import base64, os, pathlib
-raw = os.environ.get('ZO_STORAGE_STATE_B64', '').strip()
-if raw:
-    pathlib.Path('zo_storage_state.json').write_bytes(base64.b64decode(raw))
-PY
-          fi
+          python3 - <<'EOF'
+          import base64, os, pathlib
+          raw = os.environ.get('ZO_STORAGE_STATE_B64', '').strip()
+          if raw and raw != 'e30=': # e30= 是 {} 的 base64
+              try:
+                  pathlib.Path('zo_storage_state.json').write_bytes(base64.b64decode(raw))
+                  print("Cookie restored successfully.")
+              except Exception as e:
+                  print(f"Failed to decode cookie: {e}")
+          EOF
 
       - name: Run Zo flow
         run: python playwright_zo_flow.py
